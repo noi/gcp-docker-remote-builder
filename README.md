@@ -1,101 +1,98 @@
-# Google Cloud Build community images
+# About This Repository
 
-This repository contains source code for community-contributed Docker images. You can use these images as build steps for
-[Google Cloud Build](https://cloud.google.com/cloud-build/docs/).
+## Summary
 
-These are not official Google products.
-
-## How to use a community-contributed build step
-
-Google Cloud Build executes a build as a series of build steps. Each build step is run in a Docker container. See
-the [Cloud Build documentation](https://cloud.google.com/cloud-build/docs/overview) for more details
-about builds and build steps.
-
-### Before you begin
-
-1.  Select or create a [Google Cloud project](https://console.cloud.google.com/cloud-resource-manager).
-2.  Enable [billing for your project](https://support.google.com/cloud/answer/6293499#enable-billing).
-3.  Enable [the Cloud Build API](https://console.cloud.google.com/flows/enableapi?apiid=cloudbuild.googleapis.com).
-4.  Install and initialize [the Cloud SDK](https://cloud.google.com/sdk/docs/).
-
-### Build the build step from source
-
-To use a community-contributed Docker image as a build step, you need to download the source code from this
-repo and build the image.
-
-The example below shows how to download and build the image for the `packer` build step on a Linux or Mac OS X workstation:
-
-1. Clone the `cloud-builders-community` repo:
-
-   ```sh
-   $ git clone https://github.com/GoogleCloudPlatform/cloud-builders-community
-   ```
-
-2. Go to the directory that has the source code for the `packer` Docker image:
-
-   ```sh
-   $ cd cloud-builders-community/packer
-   ```
-
-3. Build the Docker image:
-
-   ```
-   $ gcloud builds submit --config cloudbuild.yaml .
-   ```
-
-4. View the image in Google Container Registry:
-
-   ```sh
-   $ gcloud container images list --filter packer
-   ```
-
-### Use the build step with Cloud Build build
-
-Once you've built the Docker image, you can use it as a build step in a Cloud Build build.
-
-For example, below is the `packer` build step in a YAML
-[config file](https://cloud.google.com/cloud-build/docs/build-config), ready to be used in a Cloud Build build:
-
-   ```yaml
-   - name: 'gcr.io/$PROJECT_ID/packer'
-     args:
-     - build
-     - -var
-     - project_id=$PROJECT_ID
-     - packer.json
-   ```
-
-Each build step's `examples` directory has an example of how you can use the build step. See the
-[example for the `packer` builder](https://github.com/GoogleCloudPlatform/cloud-builders-community/tree/master/packer/examples/gce).
-
-## Contributing
-
-We welcome contributions!  See [CONTRIBUTING](CONTRIBUTING.md) for more information on how to get started.
-Please include a `cloudbuild.yaml` and at least one working example in your
-[pull request](https://help.github.com/articles/about-pull-requests/).
-
-### Contribution Requirements
-
-In order to accept your contribution, it must:
-
-* make clear that the builder image is pushed to the builder's project's registry.
-  E.g., it specifies `images: ['gcr.io/$PROJECT_ID/the-tool']`. The builder will
-  not be pushed to the `gcr.io/cloud-builders` registry.
-* include a simple sanity test in the `cloudbuild.yaml` config that builds and
-  pushes the image. This can be as simple as invoking the tool with `--help`, and
-  it ensures the tool is installed correctly and in the expected location within
-  the image.
-* include some basic example describing how to use it. This helps new users get
-  acquainted with the builder, and helps us ensure the builder continues to work
-  as intended.
+This repository is a fork of [GoogleCloudPlatform/cloud-builders-community](https://github.com/GoogleCloudPlatform/cloud-builders-community), modified to build Docker images remotely.
 
 ## License
 
-This source code is licensed under Apache 2.0. Full license text is available in [LICENSE](LICENSE).
+I do not claim the license of this repository myself, but inherit and follow the license of the repository from which I forked. Please refer to [LICENSE](LICENSE) if you want to know specific details.
 
-## Support
+# Cloud Build Remote Build Step
 
-To file issues and feature requests against these builder images, the usage of these build steps or the Cloud Build API in general, [create an issue in this repo](https://github.com/GoogleCloudPlatform/cloud-builders-community/issues/new).
+## Introduction
 
-If you are experiencing an issue with the Cloud Build service or have a feature request, e-mail google-cloud-dev@googlegroups.com or see our [Getting support](https://cloud.google.com/cloud-build/docs/getting-support) documentation.
+![Architecture Diagram](docs/arch.png)
+
+Some continuous integration workloads require special builder types. You may
+require things like:
+
+1. High CPU/Memory machines
+1. Custom image
+1. GPUs attached
+1. Fast or large disks
+1. Machines in a particular network
+1. Pre-emptibility
+
+In these cases you can leverage Container Builder to trigger your builds and
+manage their workflow but run the actual build steps on an instance with
+exactly the configuration you need.
+
+## How?
+
+When using the remote-builder image, the following will happen:
+
+1. A temporary SSH key will be created in your Container Builder workspace
+1. A instance will be launched with your configured flags
+1. The workpace will be copied to the remote instance
+1. Your command will be run inside that instance's workspace
+1. The workspace will be copied back to your Container Builder workspace
+
+## Usage
+
+In order to use this step, first build the builder:
+
+```
+gcloud builds submit --config=cloudbuild.yaml .
+```
+
+Then, create an appropriate IAM role with permissions to create and destroy
+Compute Engine instances in this project:
+
+```
+export PROJECT=$(gcloud info --format='value(config.project)')
+export PROJECT_NUMBER=$(gcloud projects describe $PROJECT --format 'value(projectNumber)')
+export CB_SA_EMAIL=$PROJECT_NUMBER@cloudbuild.gserviceaccount.com
+gcloud services enable cloudbuild.googleapis.com
+gcloud services enable compute.googleapis.com
+gcloud projects add-iam-policy-binding $PROJECT --member=serviceAccount:$CB_SA_EMAIL --role='roles/iam.serviceAccountUser' --role='roles/compute.instanceAdmin.v1' --role='roles/iam.serviceAccountActor'
+```
+
+Then, configure your build step as follows:
+
+```
+steps:
+- name: gcr.io/$PROJECT_ID/remote-builder
+  env:
+    - COMMAND=ls -la
+```
+
+This will launch an instance with the default parameters and then run the
+command `ls -la` inside the instance's workspace.
+
+## Configuration
+
+The following options are configurable via environment variables passed to the
+build step in the `env` parameter:
+
+| Options       | Description   | Default |
+| ------------- | ------------- | ------- |
+| GCLOUD | The expression to use as the `gcloud` command-line utility. Can be set to `gcloud alpha` or `gcloud beta`, as examples. | `gcloud` |
+| COMMAND | Command to run inside the remote workspace | None, must be set |
+| USERNAME  | Username to use when logging into the instance via SSH  | `admin` |
+| REMOTE_WORKSPACE  | Location on remote host to use as workspace | `/home/${USERNAME}/workspace/` |
+| INSTANCE_NAME  | Name of the instance that is launched  | `builder-$UUID` |
+| ZONE  | Compute zone to launch the instance in | `us-central1-f` |
+| INSTANCE_ARGS| Parameters to the instance creation command. For a full list run `gcloud compute instances create --help` | `--preemptible` |
+| SSH_ARGS| Parameters to the ssh and scp commands. This can be useful to run ssh though a IAP tunnel with ```--tunnel-though-iap``` | None |
+| RETRIES| The number of retries to wait for the instance to start accepting SSH connections | `10` |
+
+To give it a try, see the [examples directory](https://github.com/GoogleCloudPlatform/cloud-builders-community/tree/master/remote-builder/examples).
+
+This is not an official Google product.
+
+## Trade-offs
+
+1. Paying for builder + VM
+2. Spin up time of VM increases build time
 
