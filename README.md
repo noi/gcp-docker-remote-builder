@@ -36,14 +36,13 @@ When using the remote-builder image, the following will happen:
 1. A instance will be launched with your configured flags
 1. The workpace will be copied to the remote instance
 1. Your command will be run inside that instance's workspace
-1. The workspace will be copied back to your Container Builder workspace
 
 ## Usage
 
 In order to use this step, first build the builder:
 
 ```
-gcloud builds submit --config=cloudbuild.yaml .
+gcloud builds submit --config ./cloudbuild.yaml .
 ```
 
 Then, create an appropriate IAM role with permissions to create and destroy
@@ -62,7 +61,7 @@ Then, configure your build step as follows:
 
 ```
 steps:
-- name: gcr.io/$PROJECT_ID/remote-builder
+- name: gcr.io/$PROJECT_ID/docker-remote-builder
   env:
     - COMMAND=ls -la
 ```
@@ -77,19 +76,24 @@ build step in the `env` parameter:
 
 | Options       | Description   | Default |
 | ------------- | ------------- | ------- |
-| GCLOUD | The expression to use as the `gcloud` command-line utility. Can be set to `gcloud alpha` or `gcloud beta`, as examples. | `gcloud` |
 | COMMAND | Command to run inside the remote workspace | None, must be set |
-| USERNAME  | Username to use when logging into the instance via SSH  | `admin` |
+| USER_NAME  | Username to use when logging into the instance via SSH  | `builder` |
 | REMOTE_WORKSPACE  | Location on remote host to use as workspace | `/home/${USERNAME}/workspace/` |
-| INSTANCE_NAME  | Name of the instance that is launched  | `builder-$UUID` |
-| ZONE  | Compute zone to launch the instance in | `us-central1-f` |
+| INSTANCE_NAME  | Name of the instance that is launched  | `docker-remote-builder-$UUID` |
+| ZONE  | Compute zone to launch the instance in | `asia-southeast1-b` |
 | INSTANCE_ARGS| Parameters to the instance creation command. For a full list run `gcloud compute instances create --help` | `--preemptible` |
-| SSH_ARGS| Parameters to the ssh and scp commands. This can be useful to run ssh though a IAP tunnel with ```--tunnel-though-iap``` | None |
+| INSTANCE_SPOT_ARGS| It has the same purpose as INSTANCE_ARGS and is used in conjunction with it | `--no-restart-on-failure --maintenance-policy=TERMINATE --provisioning-model=SPOT --instance-termination-action=DELETE --max-run-duration=$INSTANCE_MAX_DURATION` |
+| INSTANCE_MAX_DURATION | The maximum uptime of the instance and is used in the default of INSTANCE_SPOT_ARGS | `3600s` |
 | RETRIES| The number of retries to wait for the instance to start accepting SSH connections | `10` |
 
-To give it a try, see the [examples directory](https://github.com/GoogleCloudPlatform/cloud-builders-community/tree/master/remote-builder/examples).
+## Example
 
-This is not an official Google product.
+[example](example) directory contains example for building AMD64 and ARM64 multiplatform Docker image.
+The following command will build and push `gcr.io/$PROJECT_ID/docker-remote-builder-example:0.0.0`.
+
+```
+gcloud builds submit --config ./example/cloudbuild.yaml ./example/
+```
 
 ## Trade-offs
 
