@@ -1,0 +1,27 @@
+steps:
+- id: 'build-and-push-amd64'
+  name: "gcr.io/$PROJECT_ID/docker-remote-builder"
+  env:
+    - INSTANCE_ARGS=--preemptible --image-project ubuntu-os-cloud --image-family ubuntu-2204-lts --machine-type=n1-standard-4 --scopes=storage-rw
+    - ZONE=asia-southeast1-b
+    - COMMAND=gcloud auth configure-docker gcr.io -q && docker buildx build --platform=linux/amd64 -t gcr.io/$PROJECT_ID/docker-remote-builder-example:0.0.0-amd64 --push .
+  waitFor: ['-']
+- id: 'build-and-push-arm64'
+  name: "gcr.io/$PROJECT_ID/docker-remote-builder"
+  env:
+    - INSTANCE_ARGS=--preemptible --image-project ubuntu-os-cloud --image-family ubuntu-2204-lts-arm64 --machine-type=t2a-standard-4 --scopes=storage-rw
+    - ZONE=asia-southeast1-b
+    - COMMAND=gcloud auth configure-docker gcr.io -q && docker buildx build --platform=linux/arm64 -t gcr.io/$PROJECT_ID/docker-remote-builder-example:0.0.0-arm64 --push .
+  waitFor: ['-']
+- id: 'create-and-push-manifest'
+  name: 'gcr.io/cloud-builders/docker'
+  entrypoint: 'bash'
+  args:
+    - -c
+    - |
+      set -ueo pipefail
+      uri="gcr.io/$PROJECT_ID/docker-remote-builder-example:0.0.0"
+      docker manifest create $${uri} $${uri}-arm64 $${uri}-amd64
+      docker manifest inspect $${uri}
+      docker manifest push $${uri}
+  waitFor: ['build-and-push-amd64', 'build-and-push-arm64']
